@@ -107,7 +107,6 @@ class OpgSesame:
 
         while True:
             header = self.fhand.readline()
-            print (header.split())
             if not header: break # Reached EOF
             if header[:3] == " 2 ": break
 
