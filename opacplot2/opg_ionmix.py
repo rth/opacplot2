@@ -6,6 +6,7 @@ import sys
 import numpy as np
 import re
 import math
+import opacplot2 as opp
 
 from .opl_grid import OplGrid
 from .constants import ERG_TO_JOULE
@@ -197,7 +198,7 @@ class OpacIonmix:
             self.temps = self.get_block(self.ntemp)
             self.numDens = self.get_block(self.ndens)
 
-        self.dens = self.numDens * self.mpi
+        self.dens = self.numDens * self.mpi/opp.NA
 
         if self.verb:
             print("  Number of temperatures: %i" % self.ntemp)
@@ -507,6 +508,40 @@ class OpacIonmix:
         self.temps = arr
 
         self.ntemp += 1
+    def toEosDict(self, Znum=None,Xnum=None, log=None):
+        eos_dict = {}
+        if Znum is None:
+            raise ValueError('Znum Varray should be provided!')
+
+        if Xnum is None:
+            if len(Znum) == 1:
+                Xnum2 = np.array([1.0])
+            else:
+                raise ValueError('Xnum array should be provided!')
+        else:
+            Xnum2 = np.array(Xnum)
+        eos_dict['idens'  ] = self.numDens
+        eos_dict['temp'   ] = self.temps
+        eos_dict['dens'   ] = self.dens
+        eos_dict['Zf_DT'  ] = self.zbar
+        eos_dict['Ut_DT'  ] = self.eion+self.eele#self.etot
+        eos_dict['Uec_DT' ] = self.eele
+        eos_dict['Ui_DT'  ] = self.eion
+        eos_dict['Pi_DT'  ] = self.pion
+        eos_dict['Pec_DT' ] = self.pele
+        eos_dict['Znum'   ] = np.array(Znum)
+        eos_dict['Xnum'   ] = Xnum2
+        eos_dict['BulkMod'] = 1.
+        print(self.mpi[0], opp.NA)
+        eos_dict['Abar'   ] = self.mpi[0]
+        eos_dict['Zmax'   ] = np.dot(np.array(Znum), Xnum2)
+        # mean opacities
+        eos_dict['opp_int'] = self.planck_absorb[:,:,0]
+        eos_dict['opr_int'] = self.rosseland[:,:,0]
+
+        return eos_dict
+
+
 
 
 def writeIonmixFile(fn, zvals, fracs, numDens, temps,
@@ -697,6 +732,7 @@ def writeIonmixFile(fn, zvals, fracs, numDens, temps,
     write_block(pele.flatten()*ERG_TO_JOULE, 'electron pressure')
     write_block(dpidt.flatten()*ERG_TO_JOULE, 'D(ion pressure)_DT')
     write_block(dpedt.flatten()*ERG_TO_JOULE, 'D(electron pressure)_DT')
+    print (eion[0,0], eion[0,0]*ERG_TO_JOULE, ERG_TO_JOULE)
     write_block(eion.flatten()*ERG_TO_JOULE, 'ion energy')
     write_block(eele.flatten()*ERG_TO_JOULE, 'electron energy')
     write_block(cvion.flatten()*ERG_TO_JOULE, 'ion CV')
