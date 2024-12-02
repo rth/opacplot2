@@ -199,7 +199,6 @@ class Formats_toEosDict(object):
         return eos_dict
 
     def ionmix_toEosDict(self):
-        print(self.args.mpi)
         op = opp.OpacIonmix(self.path_in, self.args.mpi, man=True, twot=True)
         eos_dict = op.toEosDict(
             Znum=self.args.Znum, Xnum=self.args.Xfracs, log=self.args.log
@@ -304,9 +303,7 @@ class EosDict_toSesameFile(object):
             xx = self.eos_dict["Xnum"]
             znum = 0.0
             for i in range(len(self.eos_dict["Znum"])):
-                print(zz[i])
                 znum += zz[i] * xx[i]
-                print(znum)
         else:
             znum = self.eos_dict["Znum"][0]
 
@@ -451,7 +448,6 @@ def convert_tables():
     ).eos_dict
 
     output_type = input_data["args"].output
-    print(output_type)
     if output_type == "sesame":
         EosDict_toSesameFile(input_data["args"], eos_dict)
     else:
