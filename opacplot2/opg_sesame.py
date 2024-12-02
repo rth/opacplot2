@@ -5,12 +5,13 @@ from __future__ import print_function
 
 from io import open
 import six
+import textwrap
 
 import opacplot2 as opp
 import opacplot2.utils
 
 import numpy as np
-from .constants import KELVIN_TO_EV, GPA_TO_ERGCC, MJKG_TO_ERGCC
+from .constants import KELVIN_TO_EV, GPA_TO_ERGCC, MJKG_TO_ERGCC, ERGCC_TO_GPA, ERGG_TO_MJKG
 
 import periodictable as ptab
 
@@ -87,6 +88,7 @@ class OpgSesame:
                        412 : self.parseLiquid,
                        431 : self.parseShear,
                        432 : self.parseShear,
+                       504 : self.parseZbar,
                        601 : self.parseZbar,
                        602 : self.parseEcond,
                        603 : self.parseTcond,
@@ -332,35 +334,37 @@ class OpgSesame:
             opp_ses_data['Xnum'] = np.array(Xnum)
 
 
-        # Calculate zbar using thomas_fermi_ionization.
-        # If there are multiple elements, it suffices to use the average
-        # atomic number in this calculation - JTL
-        dens_arr, temp_arr = np.meshgrid(opp_ses_data['ele_dens'],
-                                         opp_ses_data['ele_temps'])
-        zbar = eos.thomas_fermi_ionization(dens_arr,
-                                           temp_arr,
-                                           np.average(opp_ses_data['Znum'], weights=opp_ses_data['Xnum']),
-                                           opp_ses_data['abar']).T
-        opp_ses_data['zbar'] = zbar
+        #ionization is possibly on a completely different grid
+        if (not 'zbar' in opp_ses_data.keys()):
+            # Calculate zbar using thomas_fermi_ionization.
+            # If there are multiple elements, it suffices to use the average
+            # atomic number in this calculation - JTL
+            dens_arr, temp_arr = np.meshgrid(opp_ses_data['ele_dens'],
+                                             opp_ses_data['ele_temps'])
+            zbar = eos.thomas_fermi_ionization(dens_arr,
+                                               temp_arr,
+                                               opp_ses_data['Znum'].mean(),
+                                               opp_ses_data['abar']).T
+            opp_ses_data['zbar'] = zbar
 
         # Translating SESAME names to common dictionary format.
         if qeos:
             # Names are slightly different for QEOS SESAME
-            names_dict = {'idens':'idens',
-                          'ele_temps':'temp', # We merged ele_ and ion_ dens &
-                                              # temp grids for qeos.
-                          'ele_dens':'dens',
-                          'zbar':'Zf_DT',
-                          'total_eint':'Ut_DT', # But not their energies.
-                          'ele_eint':'Uec_DT',
-                          'ion_eint':'Ui_DT',
-                          'ion_pres':'Pi_DT',
-                          'ele_pres':'Pec_DT',
-                          'Znum':'Znum',
-                          'Xnum':'Xnum',
-                          'bulkmod':'BulkMod',
-                          'abar':'Abar',
-                          'zmax':'Zmax'
+            names_dict = {'idens'     :'idens'  ,
+                          'ele_temps' :'temp'   , # We merged ele_ and ion_ dens &
+                                                 # temp grids for qeos.
+                          'ele_dens'  :'dens'   ,
+                          'zbar'      :'Zf_DT'  ,
+                          'total_eint':'Ut_DT'  , # But not their energies.
+                          'ele_eint'  :'Uec_DT' ,
+                          'ion_eint'  :'Ui_DT'  ,
+                          'ion_pres'  :'Pi_DT'  ,
+                          'ele_pres'  :'Pec_DT' ,
+                          'Znum'      :'Znum'   ,
+                          'Xnum'      :'Xnum'   ,
+                          'bulkmod'   :'BulkMod',
+                          'abar'      :'Abar'   ,
+                          'zmax'      :'Zmax'
                           }
 
         else:
@@ -397,3 +401,43 @@ class OpgSesame:
                 if key in log:
                     eos_dict[key] = np.log10(eos_dict[key])
         return eos_dict
+def writeSesameFile(fn, t201, t301, t303, t304, t305, t502, t504, t505, t601):
+    CHAR_LINE_LEN = 80
+    WORDS_PER_LINE = 5
+    comment = 'This Sesame table was generated using OpacPlot2 to convert an IONMIX EoS table to the Sesame format'
+    f = open(fn, 'w')
+    #write comments
+    comment = comment + ' '*(80-len(comment)%80)
+    header = ' 0  9999   101   %d   r    82803    22704   1' % len(comment)
+    header = header + (79-len(header))*' ' + '0\n'
+    f.write(header)
+    for i in range(len(comment)//80):
+        f.write(comment[i*80:(i+1)*80]+'\n')
+
+    def theader(num):
+        return(' 1  9999   %d   240   r    82803    22704   1                                 1\n'  % num)
+    def write_block(fid, num, data):
+        header = ' 1  9999   %d   %d   r    82803    22704   1'  % (num,len(data))
+        header = header + (79-len(header))*' ' + '1\n'
+        fid.write(header)
+        count = 0
+        for n in range(len(data)):
+            count += 1
+            fid.write('%22.15E' % data[n])
+            if count == 5:
+                count = 0
+                fid.write('11111\n')
+        if count > 0:
+            m = 5-count
+            fid.write(m*22*' ' + count*'1' + m*'0' + '\n')
+
+    write_block(f, 201, t201)
+    write_block(f, 301, t301)
+    write_block(f, 303, t303)
+    write_block(f, 304, t304)
+    write_block(f, 305, t305)
+    write_block(f, 502, t502)
+    write_block(f, 504, t504)
+    write_block(f, 505, t505)
+    write_block(f, 601, t601)
+    f.close()

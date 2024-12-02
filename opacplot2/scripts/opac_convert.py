@@ -1,11 +1,14 @@
 import opacplot2 as opp
 import argparse
 import os.path
+import numpy as np
+from opacplot2.constants import EV_TO_KELVIN, ERGCC_TO_GPA, ERGG_TO_MJKG
+
 
 def get_input_data():
     # Available formats.
-    avail_output_formats = ['ionmix']
-    avail_input_formats = ['propaceos', 'multi', 'sesame', 'sesame-qeos', 'tops']
+    avail_output_formats = ["ionmix", "sesame"]
+    avail_input_formats = ["propaceos", "multi", "sesame", "sesame-qeos", "ionmix", "tops"]
 
     # Creating the argument parser.
     parser = argparse.ArgumentParser(
@@ -53,6 +56,8 @@ def get_input_data():
                         action='store', type=str,
                         help='Specify the SESAME table number.')
 
+    parser.add_argument("--mpi", action="store", type=str, help="Mass per ion in grams")
+
     args = parser.parse_args()
 
     # Get the relevant paths and filenames.
@@ -69,11 +74,13 @@ def get_input_data():
     else:
         args.outname = os.path.join(basedir, basename)
 
-    # Create lists out of the strings for Znum, Xfracs, and log if given.
+    # Create lists out of the strings for Znum, Xfracs, mpi, and log if given.
     if args.Znum is not None:
         args.Znum = [int(num) for num in args.Znum.split(',')]
     if args.Xfracs is not None:
         args.Xfracs = [float(num) for num in args.Xfracs.split(',')]
+    if args.mpi is not None:
+        args.mpi = [float(num) for num in args.mpi.split(",")]
     if args.log is not None:
         args.log = [str(key) for key in args.log.split(',')]
 
@@ -99,6 +106,7 @@ def read_format_ext(args, fn_in):
                 '.opp':'multi',
                 '.opz':'multi',
                 '.opr':'multi',
+                ".cn4": "ionmix",
                 '.mexport':'sesame-qeos',
                 '.ses':'sesame',
                 '.html':'tops',
@@ -143,6 +151,7 @@ class Formats_toEosDict(object):
         self.handle_dict = {'propaceos' : self.propaceos_toEosDict,
                             'multi' : self.multi_toEosDict,
                             'sesame' : self.sesame_toEosDict,
+                            "ionmix": self.ionmix_toEosDict,
                             'sesame-qeos' : self.sesame_qeos_toEosDict,
                             'tops' : self.tops_toEosDict,
                             }
@@ -152,7 +161,7 @@ class Formats_toEosDict(object):
         # we need to let the user know.
         try:
             import opacplot2.opg_propaceos
-            op = opp.opg_propaceos.OpgPropaceosAscii(self.path_in)
+            op = opp.opg_propaceos.OpgPropaceosAscii(self.path_in, mpi=self.args.mpi)
             eos_dict = op.toEosDict(log=self.args.log)
             return eos_dict
         except ImportError:
@@ -163,6 +172,14 @@ class Formats_toEosDict(object):
         eos_dict = op.toEosDict(Znum=self.args.Znum,
                                 Xnum=self.args.Xfracs,
                                 log=self.args.log)
+        return eos_dict
+
+    def ionmix_toEosDict(self):
+        op = opp.OpacIonmix(self.path_in, self.args.mpi, man=True, twot=True)
+        eos_dict = op.toEosDict(
+            Znum=self.args.Znum, Xnum=self.args.Xfracs, log=self.args.log
+        )
+
         return eos_dict
 
     def sesame_toEosDict(self):
@@ -214,6 +231,81 @@ class Formats_toEosDict(object):
         op = opp.OpgTOPS(self.path_in)
         eos_dict = op.toEosDict(fill_eos=True)
         return eos_dict
+
+
+class EosDict_toSesameFile(object):
+    """
+    Takes a common EoS dictionary and writes it to the correct output format.
+    """
+
+    def __init__(self, args, eos_dict):
+        self.set_handle_dict()
+        self.args = args
+        self.eos_dict = eos_dict
+
+        self.handle_dict[args.output]()
+
+    def set_handle_dict(self):
+        self.handle_dict = {"sesame": self.eosDict_toSesame}
+
+    def eosDict_toSesame(self):
+        # initialize sesame argument dictionary
+        ses_dict = {}
+        # we should need to convert units to what sesame needs
+        dens = np.array(self.eos_dict["dens"])
+        temp = np.array(self.eos_dict["temp"])
+        pele = np.array(self.eos_dict["Pec_DT"])
+        pion = np.array(self.eos_dict["Pi_DT"])
+        uele = np.array(self.eos_dict["Uec_DT"])
+        uion = np.array(self.eos_dict["Ui_DT"])
+        utot = np.array(self.eos_dict["Ut_DT"])
+        dummy = np.array(self.eos_dict["Ut_DT"])
+        zbar = np.array(self.eos_dict["Zf_DT"])
+        plnk = np.array(self.eos_dict["opp_int"])
+        rsln = np.array(self.eos_dict["opr_int"])
+        ptot = pele + pion
+
+        if len(self.eos_dict["Znum"]) > 1:
+            zz = self.eos_dict["Znum"]
+            xx = self.eos_dict["Xnum"]
+            znum = 0.0
+            for i in range(len(self.eos_dict["Znum"])):
+                znum += zz[i] * xx[i]
+        else:
+            znum = self.eos_dict["Znum"][0]
+
+        ses_dict["t201"] = np.array([znum, self.eos_dict["Abar"], 1.0, 1.0, 1.0])
+        ses_dict["t301"] = self.tables_toSesame(dens, temp, ptot, utot, dummy)
+        ses_dict["t303"] = self.tables_toSesame(dens, temp, pion, uion, dummy)
+        ses_dict["t304"] = self.tables_toSesame(dens, temp, pele, uele, dummy)
+        ses_dict["t305"] = self.tables_toSesame(dens, temp, pion, uion, dummy)
+        ses_dict["t502"] = self.zbar_toSesame(dens, temp, rsln)
+        ses_dict["t505"] = self.zbar_toSesame(dens, temp, plnk)
+        ses_dict["t504"] = self.zbar_toSesame(dens, temp, zbar)
+        ses_dict["t601"] = self.zbar_toSesame(dens, temp, zbar)
+
+        opp.writeSesameFile(self.args.outname + ".ses", **ses_dict)
+
+    def tables_toSesame(self, dens, temp, pres, enrg, fnrg):
+        # flatten (n,t) tables into sesame array for 301-305 tables
+        ses_tab = np.array([len(dens), len(temp)])
+        ses_tab = np.append(ses_tab, dens)
+        ses_tab = np.append(ses_tab, temp * EV_TO_KELVIN)
+        ses_tab = np.append(ses_tab, np.transpose(pres).flatten() * ERGCC_TO_GPA)
+        ses_tab = np.append(ses_tab, np.transpose(enrg).flatten() * ERGG_TO_MJKG)
+        ses_tab = np.append(ses_tab, np.transpose(fnrg).flatten())
+        return ses_tab
+
+    def zbar_toSesame(self, dens, temp, data):
+        Ldens = np.log10(dens)
+        Ltemp = np.log10(temp)
+        Ldata = np.log10(np.transpose(data).flatten())
+        ses_tab = np.array([len(Ldens), len(Ltemp)])
+        ses_tab = np.append(ses_tab, Ldens)
+        ses_tab = np.append(ses_tab, Ltemp)
+        ses_tab = np.append(ses_tab, Ldata)
+        return ses_tab
+
 
 class EosDict_toIonmixFile(object):
     """
@@ -314,7 +406,12 @@ def convert_tables():
                                  input_data['basename'],
                                  input_data['path_in']).eos_dict
 
-    EosDict_toIonmixFile(input_data['args'], eos_dict)
+    output_type = input_data["args"].output
+    if output_type == "sesame":
+        EosDict_toSesameFile(input_data["args"], eos_dict)
+    else:
+        EosDict_toIonmixFile(input_data["args"], eos_dict)
 
-if __name__=='__main__':
+
+if __name__ == "__main__":
     convert_tables()

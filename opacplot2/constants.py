@@ -16,8 +16,17 @@ MJKG_TO_ERGG = 1.0e+10
 # Convert MJ/kg to Ergs/cc:
 MJKG_TO_ERGCC = 1.0e+10
 
+# Convert  Ergs/cc to GPa:
+ERGCC_TO_GPA =1./GPA_TO_ERGCC
+
+# Convert  Ergs/g to MJ/kg:
+ERGG_TO_MJKG =1./MJKG_TO_ERGG
+
 # Convert Kelvin to eV:
 KELVIN_TO_EV = 1.0/11604.55
+
+# Convert eV to Kelvin:
+EV_TO_KELVIN = 11604.55
 
 # Avogadros number
 NA = 6.0221415e+23
